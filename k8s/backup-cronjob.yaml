@@ -1,0 +1,456 @@
+# Automated Backup CronJob for Plumbing AI Platform
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: database-backup
+  namespace: plumbing-ai
+  labels:
+    app: plumbing-ai-platform
+    component: backup
+spec:
+  # Run daily at 3:00 AM UTC
+  schedule: "0 3 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 7200  # 2 hours timeout
+      template:
+        metadata:
+          labels:
+            app: plumbing-ai-platform
+            component: backup
+            job-type: database-backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            fsGroup: 1001
+          containers:
+          - name: database-backup
+            image: postgres:15-alpine
+            imagePullPolicy: IfNotPresent
+            
+            # Install additional tools
+            command:
+            - /bin/sh
+            - -c
+            - |
+              # Install required tools
+              apk update && apk add --no-cache \
+                aws-cli \
+                gnupg \
+                curl \
+                bash \
+                findutils \
+                tar \
+                gzip
+              
+              # Copy backup script
+              cp /scripts/database-backup.sh /tmp/backup.sh
+              chmod +x /tmp/backup.sh
+              
+              # Run backup
+              exec /tmp/backup.sh
+            
+            env:
+            # Database connection
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: plumbing-ai-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: plumbing-ai-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: plumbing-ai-config
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: plumbing-ai-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: plumbing-ai-secrets
+                  key: DB_PASSWORD
+            
+            # Backup configuration
+            - name: ENVIRONMENT
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: BACKUP_S3_BUCKET
+              value: "plumbing-ai-backups"
+            - name: BACKUP_RETENTION_DAYS
+              value: "30"
+            - name: ENCRYPT_BACKUP
+              value: "true"
+            - name: BACKUP_GPG_RECIPIENT
+              value: "backup@plumbing-ai.com"
+            
+            # Notification settings
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: SLACK_WEBHOOK_URL
+                  optional: true
+            - name: NOTIFICATION_ENABLED
+              value: "true"
+            
+            # AWS credentials
+            - name: AWS_DEFAULT_REGION
+              value: "us-west-2"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: access_key_id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: secret_access_key
+            
+            volumeMounts:
+            - name: backup-script
+              mountPath: /scripts
+              readOnly: true
+            - name: backup-storage
+              mountPath: /opt/plumbing-ai/backups
+            - name: gpg-keys
+              mountPath: /root/.gnupg
+              readOnly: true
+            - name: aws-config
+              mountPath: /root/.aws
+              readOnly: true
+            
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "1Gi"
+                cpu: "500m"
+          
+          volumes:
+          - name: backup-script
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage-pvc
+          - name: gpg-keys
+            secret:
+              secretName: gpg-keys
+              defaultMode: 0600
+          - name: aws-config
+            secret:
+              secretName: aws-config
+              defaultMode: 0600
+
+---
+# Weekly Full Backup CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: weekly-full-backup
+  namespace: plumbing-ai
+  labels:
+    app: plumbing-ai-platform
+    component: backup
+spec:
+  # Run weekly on Sunday at 2:00 AM UTC
+  schedule: "0 2 * * 0"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 14400  # 4 hours timeout for full backup
+      template:
+        metadata:
+          labels:
+            app: plumbing-ai-platform
+            component: backup
+            job-type: weekly-full-backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            fsGroup: 1001
+          containers:
+          - name: weekly-backup
+            image: postgres:15-alpine
+            imagePullPolicy: IfNotPresent
+            
+            command:
+            - /bin/sh
+            - -c
+            - |
+              apk update && apk add --no-cache \
+                aws-cli \
+                gnupg \
+                curl \
+                bash \
+                findutils \
+                tar \
+                gzip \
+                rsync
+              
+              cp /scripts/database-backup.sh /tmp/backup.sh
+              chmod +x /tmp/backup.sh
+              
+              # Set weekly backup flag
+              export BACKUP_TYPE="weekly"
+              export BACKUP_RETENTION_DAYS="90"
+              
+              exec /tmp/backup.sh
+            
+            env:
+            # Same environment variables as daily backup
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: plumbing-ai-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: plumbing-ai-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: plumbing-ai-config
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: plumbing-ai-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: plumbing-ai-secrets
+                  key: DB_PASSWORD
+            - name: ENVIRONMENT
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: BACKUP_S3_BUCKET
+              value: "plumbing-ai-backups"
+            - name: ENCRYPT_BACKUP
+              value: "true"
+            - name: BACKUP_GPG_RECIPIENT
+              value: "backup@plumbing-ai.com"
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: SLACK_WEBHOOK_URL
+                  optional: true
+            - name: NOTIFICATION_ENABLED
+              value: "true"
+            - name: AWS_DEFAULT_REGION
+              value: "us-west-2"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: access_key_id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: secret_access_key
+            
+            volumeMounts:
+            - name: backup-script
+              mountPath: /scripts
+              readOnly: true
+            - name: backup-storage
+              mountPath: /opt/plumbing-ai/backups
+            - name: gpg-keys
+              mountPath: /root/.gnupg
+              readOnly: true
+            - name: aws-config
+              mountPath: /root/.aws
+              readOnly: true
+            
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "200m"
+              limits:
+                memory: "2Gi"
+                cpu: "1000m"
+          
+          volumes:
+          - name: backup-script
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage-pvc
+          - name: gpg-keys
+            secret:
+              secretName: gpg-keys
+              defaultMode: 0600
+          - name: aws-config
+            secret:
+              secretName: aws-config
+              defaultMode: 0600
+
+---
+# ConfigMap for backup scripts
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-scripts
+  namespace: plumbing-ai
+  labels:
+    app: plumbing-ai-platform
+    component: backup
+data:
+  database-backup.sh: |
+    # Backup script content would be embedded here
+    # In practice, this would contain the full script content
+    echo "Backup script would be here - see separate file"
+    exit 1
+
+---
+# PersistentVolumeClaim for backup storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-storage-pvc
+  namespace: plumbing-ai
+  labels:
+    app: plumbing-ai-platform
+    component: backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: "fast-ssd"
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+# Backup verification job (runs after backup completion)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-verification
+  namespace: plumbing-ai
+  labels:
+    app: plumbing-ai-platform
+    component: backup-verification
+spec:
+  # Run daily at 4:00 AM UTC (1 hour after backup)
+  schedule: "0 4 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  startingDeadlineSeconds: 1800
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: plumbing-ai-platform
+            component: backup-verification
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            fsGroup: 1001
+          containers:
+          - name: backup-verification
+            image: postgres:15-alpine
+            imagePullPolicy: IfNotPresent
+            
+            command:
+            - /bin/sh
+            - -c
+            - |
+              apk update && apk add --no-cache \
+                aws-cli \
+                gnupg \
+                curl \
+                bash \
+                jq
+              
+              # Verify latest backup exists and is valid
+              BACKUP_DATE=$(date -d "yesterday" '+%Y-%m-%d')
+              S3_PATH="s3://plumbing-ai-backups/plumbing-ai/$BACKUP_DATE*/"
+              
+              echo "Verifying backup for date: $BACKUP_DATE"
+              
+              if aws s3 ls "$S3_PATH" | grep -q "backup-manifest.json"; then
+                echo "Backup verification: SUCCESS"
+                if [ -n "$SLACK_WEBHOOK_URL" ]; then
+                  curl -X POST -H 'Content-type: application/json' \
+                    --data '{"text":"✅ Backup verification successful for '$BACKUP_DATE'"}' \
+                    "$SLACK_WEBHOOK_URL"
+                fi
+              else
+                echo "Backup verification: FAILED"
+                if [ -n "$SLACK_WEBHOOK_URL" ]; then
+                  curl -X POST -H 'Content-type: application/json' \
+                    --data '{"text":"❌ Backup verification failed for '$BACKUP_DATE'"}' \
+                    "$SLACK_WEBHOOK_URL"
+                fi
+                exit 1
+              fi
+            
+            env:
+            - name: AWS_DEFAULT_REGION
+              value: "us-west-2"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: access_key_id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-credentials
+                  key: secret_access_key
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: SLACK_WEBHOOK_URL
+                  optional: true
+            
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "50m"
+              limits:
+                memory: "256Mi"
+                cpu: "100m"

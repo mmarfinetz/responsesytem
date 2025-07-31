@@ -1,0 +1,1374 @@
+openapi: 3.0.3
+info:
+  title: Plumbing Business AI Platform API
+  description: |
+    Comprehensive API for the production-ready plumbing business AI platform.
+    
+    This API provides endpoints for managing customers, jobs, conversations, AI interactions,
+    emergency responses, scheduling, pricing, warranties, and system monitoring.
+    
+    ## Features
+    - **Customer Management**: Complete customer lifecycle management
+    - **AI-Powered Conversations**: Intelligent message processing and response generation
+    - **Emergency Response**: Real-time emergency detection and routing
+    - **Dynamic Pricing**: Intelligent pricing based on multiple factors
+    - **Scheduling Optimization**: Advanced technician scheduling and route optimization
+    - **Warranty Management**: Comprehensive warranty tracking and claims processing
+    - **Performance Monitoring**: Real-time system health and performance metrics
+    
+    ## Authentication
+    All endpoints require JWT-based authentication unless otherwise specified.
+    Include the token in the Authorization header: `Bearer {token}`
+    
+    ## Rate Limiting
+    API requests are rate-limited to prevent abuse:
+    - Standard endpoints: 1000 requests per hour per user
+    - Search endpoints: 100 requests per minute per user
+    - Webhook endpoints: 10,000 requests per hour
+    
+    ## Error Handling
+    The API uses standard HTTP status codes and returns structured error responses:
+    ```json
+    {
+      "error": {
+        "code": "VALIDATION_ERROR",
+        "message": "Invalid input data",
+        "details": {
+          "field": "email",
+          "issue": "Invalid email format"
+        }
+      }
+    }
+    ```
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@plumbingai.com
+    url: https://docs.plumbingai.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.plumbingai.com/v1
+    description: Production server
+  - url: https://staging-api.plumbingai.com/v1
+    description: Staging server
+  - url: http://localhost:3001/api
+    description: Development server
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: Customers
+    description: Customer management and profiles
+  - name: Jobs
+    description: Service jobs and work orders
+  - name: Conversations
+    description: Customer communication management
+  - name: AI Services
+    description: AI-powered features and responses
+  - name: Emergency
+    description: Emergency response and routing
+  - name: Scheduling
+    description: Technician scheduling and optimization
+  - name: Quotes
+    description: Service quotes and pricing
+  - name: Warranties
+    description: Warranty management and claims
+  - name: Analytics
+    description: Business analytics and reporting
+  - name: Webhooks
+    description: External webhook integrations
+  - name: System
+    description: System health and monitoring
+
+paths:
+  # Authentication Endpoints
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: User login
+      description: Authenticate user credentials and return JWT token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@plumbingcompany.com
+                password:
+                  type: string
+                  format: password
+                  example: securePassword123
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  user:
+                    $ref: '#/components/schemas/User'
+                  expiresIn:
+                    type: string
+                    example: 24h
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: User registration
+      description: Register a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegistration'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  user:
+                    $ref: '#/components/schemas/User'
+                  message:
+                    type: string
+                    example: User registered successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: User logout
+      description: Invalidate current session token
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Logged out successfully
+
+  # Customer Endpoints
+  /customers:
+    get:
+      tags: [Customers]
+      summary: List customers
+      description: Retrieve paginated list of customers with optional filtering
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search in customer name, email, or phone
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, blocked]
+        - name: customerType
+          in: query
+          schema:
+            type: string
+            enum: [residential, commercial, property_manager]
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [name, createdAt, totalRevenue, lastServiceDate]
+            default: createdAt
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: Customers retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  customers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Customer'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                  totalCount:
+                    type: integer
+                    example: 150
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Customers]
+      summary: Create customer
+      description: Create a new customer profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerCreate'
+      responses:
+        '201':
+          description: Customer created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  customer:
+                    $ref: '#/components/schemas/Customer'
+                  message:
+                    type: string
+                    example: Customer created successfully
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /customers/{customerId}:
+    get:
+      tags: [Customers]
+      summary: Get customer details
+      description: Retrieve detailed information about a specific customer
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: include
+          in: query
+          schema:
+            type: string
+          description: 'Comma-separated list of related data to include: properties,serviceHistory,warranties,conversations'
+      responses:
+        '200':
+          description: Customer details retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  customer:
+                    $ref: '#/components/schemas/CustomerDetailed'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Customers]
+      summary: Update customer
+      description: Update customer information
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerUpdate'
+      responses:
+        '200':
+          description: Customer updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  customer:
+                    $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /customers/search:
+    get:
+      tags: [Customers]
+      summary: Search customers
+      description: Advanced customer search with fuzzy matching
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query (name, email, phone, address)
+        - name: fuzzy
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Enable fuzzy matching
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  customers:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Customer'
+                        - type: object
+                          properties:
+                            matchScore:
+                              type: number
+                              minimum: 0
+                              maximum: 1
+                              description: Search relevance score
+                  searchStats:
+                    type: object
+                    properties:
+                      totalMatches:
+                        type: integer
+                      searchTime:
+                        type: number
+                        description: Search time in milliseconds
+
+  # Job Endpoints
+  /jobs:
+    get:
+      tags: [Jobs]
+      summary: List jobs
+      description: Retrieve paginated list of jobs with filtering options
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [scheduled, assigned, in_progress, completed, cancelled]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, normal, high, emergency]
+        - name: serviceType
+          in: query
+          schema:
+            type: string
+        - name: customerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: technicianId
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: include
+          in: query
+          schema:
+            type: string
+          description: 'Related data to include: customer,technician,quote,materials'
+      responses:
+        '200':
+          description: Jobs retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                  summary:
+                    type: object
+                    properties:
+                      totalJobs:
+                        type: integer
+                      byStatus:
+                        type: object
+                        additionalProperties:
+                          type: integer
+                      totalRevenue:
+                        type: number
+
+    post:
+      tags: [Jobs]
+      summary: Create job
+      description: Create a new service job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobCreate'
+      responses:
+        '201':
+          description: Job created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  job:
+                    $ref: '#/components/schemas/Job'
+
+  # AI Services Endpoints
+  /ai/generate-response:
+    post:
+      tags: [AI Services]
+      summary: Generate AI response
+      description: Generate contextual AI response for customer conversations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [conversationId]
+              properties:
+                conversationId:
+                  type: string
+                  format: uuid
+                messageText:
+                  type: string
+                  description: Optional message text to respond to
+                context:
+                  type: object
+                  properties:
+                    serviceType:
+                      type: string
+                    urgencyLevel:
+                      type: string
+                      enum: [low, normal, high, emergency]
+                    customerHistory:
+                      type: object
+                    previousMessages:
+                      type: array
+                      items:
+                        type: object
+                customInstructions:
+                  type: string
+                  description: Additional instructions for response generation
+      responses:
+        '200':
+          description: AI response generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  response:
+                    type: string
+                    example: Thank you for contacting us about your plumbing issue...
+                  confidence:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                    example: 0.92
+                  requiresHumanReview:
+                    type: boolean
+                    example: false
+                  suggestedActions:
+                    type: array
+                    items:
+                      type: string
+                    example: [schedule_inspection, request_photos]
+                  context:
+                    type: object
+                    properties:
+                      serviceType:
+                        type: string
+                      urgencyLevel:
+                        type: string
+                      customerSentiment:
+                        type: string
+                        enum: [positive, neutral, negative, frustrated]
+                  metadata:
+                    type: object
+                    properties:
+                      processingTime:
+                        type: number
+                        description: Processing time in milliseconds
+                      tokenCount:
+                        type: integer
+                      model:
+                        type: string
+
+  /ai/classify-message:
+    post:
+      tags: [AI Services]
+      summary: Classify message intent
+      description: Classify customer message intent and extract key information
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageText]
+              properties:
+                messageText:
+                  type: string
+                  example: My kitchen sink is clogged and water is backing up
+                customerContext:
+                  type: object
+                  properties:
+                    customerId:
+                      type: string
+                      format: uuid
+                    serviceHistory:
+                      type: array
+                    previousInteractions:
+                      type: array
+      responses:
+        '200':
+          description: Message classified successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  classification:
+                    type: object
+                    properties:
+                      intent:
+                        type: string
+                        enum: [service_request, emergency, complaint, question, compliment]
+                      serviceType:
+                        type: string
+                      urgencyLevel:
+                        type: string
+                        enum: [low, normal, high, emergency]
+                      sentiment:
+                        type: string
+                        enum: [positive, neutral, negative, frustrated]
+                      entities:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            type:
+                              type: string
+                            value:
+                              type: string
+                            confidence:
+                              type: number
+                  confidence:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+
+  # Emergency Endpoints
+  /emergency/alerts:
+    get:
+      tags: [Emergency]
+      summary: List emergency alerts
+      description: Retrieve active and historical emergency alerts
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, resolved, escalated]
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Emergency alerts retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  alerts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EmergencyAlert'
+
+    post:
+      tags: [Emergency]
+      summary: Create emergency alert
+      description: Create a new emergency alert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmergencyAlertCreate'
+      responses:
+        '201':
+          description: Emergency alert created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  alert:
+                    $ref: '#/components/schemas/EmergencyAlert'
+
+  # Webhook Endpoints
+  /webhooks/google-voice:
+    post:
+      tags: [Webhooks]
+      summary: Google Voice webhook
+      description: Handle incoming messages and calls from Google Voice
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message, eventType]
+              properties:
+                message:
+                  type: object
+                  properties:
+                    text:
+                      type: string
+                    phoneNumber:
+                      type: string
+                    timestamp:
+                      type: string
+                      format: date-time
+                    type:
+                      type: string
+                      enum: [sms, voice_call, voicemail]
+                    direction:
+                      type: string
+                      enum: [inbound, outbound]
+                eventType:
+                  type: string
+                  enum: [message_received, call_received, voicemail_received]
+      responses:
+        '200':
+          description: Webhook processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  processed:
+                    type: boolean
+                  conversationId:
+                    type: string
+                    format: uuid
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          type: string
+          enum: [admin, dispatcher, technician, customer_service]
+        permissions:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastLoginAt:
+          type: string
+          format: date-time
+
+    UserRegistration:
+      type: object
+      required: [email, password, name, role]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+        name:
+          type: string
+          minLength: 2
+        role:
+          type: string
+          enum: [dispatcher, technician, customer_service]
+        permissions:
+          type: array
+          items:
+            type: string
+
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zipCode:
+          type: string
+        customerType:
+          type: string
+          enum: [residential, commercial, property_manager]
+        status:
+          type: string
+          enum: [active, inactive, blocked]
+        totalRevenue:
+          type: number
+          minimum: 0
+        totalServices:
+          type: integer
+          minimum: 0
+        averageRating:
+          type: number
+          minimum: 0
+          maximum: 5
+        firstServiceDate:
+          type: string
+          format: date-time
+        lastServiceDate:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CustomerCreate:
+      type: object
+      required: [name, phone]
+      properties:
+        name:
+          type: string
+          minLength: 2
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          pattern: '^\+1[0-9]{10}$'
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zipCode:
+          type: string
+        customerType:
+          type: string
+          enum: [residential, commercial, property_manager]
+          default: residential
+        notes:
+          type: string
+        source:
+          type: string
+          enum: [website, phone, referral, google_voice, walk_in]
+
+    CustomerUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zipCode:
+          type: string
+        customerType:
+          type: string
+          enum: [residential, commercial, property_manager]
+        status:
+          type: string
+          enum: [active, inactive, blocked]
+        notes:
+          type: string
+
+    CustomerDetailed:
+      allOf:
+        - $ref: '#/components/schemas/Customer'
+        - type: object
+          properties:
+            properties:
+              type: array
+              items:
+                $ref: '#/components/schemas/Property'
+            serviceHistory:
+              type: array
+              items:
+                $ref: '#/components/schemas/Job'
+            activeWarranties:
+              type: array
+              items:
+                $ref: '#/components/schemas/Warranty'
+            recentConversations:
+              type: array
+              items:
+                $ref: '#/components/schemas/Conversation'
+
+    Property:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zipCode:
+          type: string
+        type:
+          type: string
+          enum: [residential, commercial, industrial]
+        isPrimary:
+          type: boolean
+        squareFootage:
+          type: integer
+        constructionYear:
+          type: integer
+        notes:
+          type: string
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [estimate, service, maintenance, emergency_repair, warranty_service]
+        serviceType:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [scheduled, assigned, in_progress, completed, cancelled]
+        priority:
+          type: string
+          enum: [low, normal, high, emergency]
+        scheduledDate:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        estimatedDuration:
+          type: integer
+          description: Duration in minutes
+        actualDuration:
+          type: integer
+          description: Actual duration in minutes
+        assignedTechnicianId:
+          type: string
+        totalCost:
+          type: number
+          minimum: 0
+        customerRating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        warrantyPeriodMonths:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    JobCreate:
+      type: object
+      required: [customerId, type, serviceType, description]
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [estimate, service, maintenance, emergency_repair, warranty_service]
+        serviceType:
+          type: string
+        description:
+          type: string
+          minLength: 10
+        priority:
+          type: string
+          enum: [low, normal, high, emergency]
+          default: normal
+        scheduledDate:
+          type: string
+          format: date-time
+        estimatedDuration:
+          type: integer
+          minimum: 15
+          maximum: 480
+        assignedTechnicianId:
+          type: string
+        notes:
+          type: string
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        phoneNumber:
+          type: string
+        status:
+          type: string
+          enum: [active, closed, archived]
+        priority:
+          type: string
+          enum: [low, normal, high, emergency]
+        channels:
+          type: array
+          items:
+            type: string
+            enum: [sms, voice, email, chat]
+        messageCount:
+          type: integer
+        lastMessageAt:
+          type: string
+          format: date-time
+        assignedUserId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    EmergencyAlert:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [water_leak, gas_leak, flood, burst_pipe, no_water, sewage_backup]
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [active, assigned, in_progress, resolved, escalated]
+        customerId:
+          type: string
+          format: uuid
+        location:
+          type: object
+          properties:
+            address:
+              type: string
+            coordinates:
+              type: object
+              properties:
+                lat:
+                  type: number
+                lng:
+                  type: number
+        description:
+          type: string
+        reportedAt:
+          type: string
+          format: date-time
+        assignedTechnicianId:
+          type: string
+        estimatedResponseTime:
+          type: integer
+          description: Response time in minutes
+        actualResponseTime:
+          type: integer
+          description: Actual response time in minutes
+        escalationLevel:
+          type: integer
+          minimum: 0
+          maximum: 3
+
+    EmergencyAlertCreate:
+      type: object
+      required: [type, severity, customerId, description]
+      properties:
+        type:
+          type: string
+          enum: [water_leak, gas_leak, flood, burst_pipe, no_water, sewage_backup]
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        customerId:
+          type: string
+          format: uuid
+        location:
+          type: object
+          properties:
+            address:
+              type: string
+            coordinates:
+              type: object
+              properties:
+                lat:
+                  type: number
+                lng:
+                  type: number
+        description:
+          type: string
+          minLength: 10
+        reportedAt:
+          type: string
+          format: date-time
+
+    Warranty:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        jobId:
+          type: string
+          format: uuid
+        warrantyType:
+          type: string
+          enum: [parts_only, labor_only, parts_and_labor]
+        warrantyPeriodMonths:
+          type: integer
+          minimum: 1
+          maximum: 120
+        startDate:
+          type: string
+          format: date-time
+        expiryDate:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, expired, claimed, void]
+        terms:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+        totalPages:
+          type: integer
+          minimum: 1
+        hasNext:
+          type: boolean
+        hasPrev:
+          type: boolean
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+              example: Invalid input data
+            details:
+              type: object
+              additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Bad request - Invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Unauthorized - Invalid or missing token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: Forbidden - Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Conflict:
+      description: Conflict - Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    ValidationError:
+      description: Validation error - Invalid input format
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    RateLimit:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Request limit per hour
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Remaining requests in current window
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Time when rate limit resets (Unix timestamp)
+
+  examples:
+    CustomerExample:
+      value:
+        id: 550e8400-e29b-41d4-a716-446655440000
+        name: John Smith
+        email: john.smith@email.com
+        phone: +15551234567
+        address: 123 Main Street
+        city: Anytown
+        state: TX
+        zipCode: 12345
+        customerType: residential
+        status: active
+        totalRevenue: 1250.00
+        totalServices: 5
+        averageRating: 4.8
+        firstServiceDate: 2023-01-15T10:30:00Z
+        lastServiceDate: 2024-01-10T14:20:00Z
+        createdAt: 2023-01-15T10:30:00Z
+        updatedAt: 2024-01-10T14:20:00Z
+
+    JobExample:
+      value:
+        id: 660e8400-e29b-41d4-a716-446655440001
+        customerId: 550e8400-e29b-41d4-a716-446655440000
+        type: service
+        serviceType: drain_cleaning
+        description: Kitchen sink drain cleaning and inspection
+        status: completed
+        priority: normal
+        scheduledDate: 2024-01-15T09:00:00Z
+        completedAt: 2024-01-15T10:30:00Z
+        estimatedDuration: 90
+        actualDuration: 90
+        assignedTechnicianId: tech_001
+        totalCost: 150.00
+        customerRating: 5
+        warrantyPeriodMonths: 6
+        createdAt: 2024-01-14T16:45:00Z
+        updatedAt: 2024-01-15T10:30:00Z

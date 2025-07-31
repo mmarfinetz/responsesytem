@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Build outputs
+dist/
+build/
+*.log
+
+# Database files
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+
+# Temporary files
+tmp/
+temp/
+
+# Docker volumes
+docker-volumes/
+
+# Secrets and sensitive data
+**/secrets.yaml
+**/secrets.yml
+**/secrets.json
+**/secrets.js
+**/secrets.ts
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!example.tfvars
+!staging.tfvars
+!production.tfvars
+
+# Uploads directory
+uploads/
+
+# Debug files
+debug_*.png
+debug_*.log

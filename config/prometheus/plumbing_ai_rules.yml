@@ -1,0 +1,278 @@
+# Plumbing AI Platform Alert Rules
+groups:
+  # Application Performance Alerts
+  - name: plumbing_ai_application
+    rules:
+      # High Error Rate Alert
+      - alert: PlumbingAI_HighErrorRate
+        expr: (rate(http_requests_total{job="plumbing-ai-backend",status=~"5.."}[5m]) / rate(http_requests_total{job="plumbing-ai-backend"}[5m])) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+          service: backend
+          team: platform
+        annotations:
+          summary: "High error rate detected in Plumbing AI backend"
+          description: "Backend error rate is {{ $value }}% which is above 5% threshold for more than 5 minutes"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/high-error-rate"
+
+      # High Response Time Alert
+      - alert: PlumbingAI_HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="plumbing-ai-backend"}[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+          team: platform
+        annotations:
+          summary: "High response time in Plumbing AI backend"
+          description: "95th percentile response time is {{ $value }}s which is above 2s threshold"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/high-response-time"
+
+      # AI Service Availability
+      - alert: PlumbingAI_AIServiceDown
+        expr: up{job="plumbing-ai-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: ai-service
+          team: ai
+        annotations:
+          summary: "Plumbing AI service is down"
+          description: "AI service has been down for more than 2 minutes"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/service-down"
+
+      # Emergency Response Time SLA
+      - alert: PlumbingAI_EmergencyResponseSLA
+        expr: rate(emergency_response_time_seconds_sum[5m]) / rate(emergency_response_time_seconds_count[5m]) > 300
+        for: 1m
+        labels:
+          severity: critical
+          service: emergency
+          team: operations
+        annotations:
+          summary: "Emergency response time SLA breach"
+          description: "Average emergency response time is {{ $value }}s, exceeding 5-minute SLA"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/emergency-sla"
+
+      # AI Token Usage Alert
+      - alert: PlumbingAI_HighAITokenUsage
+        expr: rate(ai_tokens_used_total[1h]) > 50000
+        for: 5m
+        labels:
+          severity: warning
+          service: ai-service
+          team: cost-optimization
+        annotations:
+          summary: "High AI token usage detected"
+          description: "AI token usage rate is {{ $value }} tokens/hour, which may impact costs"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/ai-cost-optimization"
+
+      # Customer Satisfaction Score
+      - alert: PlumbingAI_LowCustomerSatisfaction
+        expr: avg_over_time(customer_satisfaction_score[1h]) < 4.0
+        for: 15m
+        labels:
+          severity: warning
+          service: customer-service
+          team: customer-success
+        annotations:
+          summary: "Low customer satisfaction detected"
+          description: "Average customer satisfaction score is {{ $value }}/5.0 over the last hour"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/customer-satisfaction"
+
+  # Database Performance Alerts
+  - name: plumbing_ai_database
+    rules:
+      # Database Connection Issues
+      - alert: PlumbingAI_DatabaseConnectionsHigh
+        expr: pg_stat_database_numbackends{datname="plumbing_ai"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+          team: platform
+        annotations:
+          summary: "High number of database connections"
+          description: "Database has {{ $value }} connections, approaching connection limit"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/database-connections"
+
+      # Database Query Performance
+      - alert: PlumbingAI_SlowQueries
+        expr: rate(pg_stat_statements_mean_time_ms[5m]) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+          team: platform
+        annotations:
+          summary: "Slow database queries detected"
+          description: "Average query time is {{ $value }}ms over the last 5 minutes"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/slow-queries"
+
+      # Database Disk Usage
+      - alert: PlumbingAI_DatabaseDiskUsageHigh
+        expr: (pg_database_size_bytes{datname="plumbing_ai"} / (1024*1024*1024)) > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: database
+          team: platform
+        annotations:
+          summary: "Database disk usage is high"
+          description: "Database size is {{ $value }}GB, approaching storage limits"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/database-storage"
+
+      # Database Replication Lag
+      - alert: PlumbingAI_DatabaseReplicationLag
+        expr: pg_replication_lag_seconds > 60
+        for: 5m
+        labels:
+          severity: critical
+          service: database
+          team: platform
+        annotations:
+          summary: "Database replication lag is high"
+          description: "Replication lag is {{ $value }}s, which may affect read replica performance"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/replication-lag"
+
+  # Cache Performance Alerts
+  - name: plumbing_ai_cache
+    rules:
+      # Redis Memory Usage
+      - alert: PlumbingAI_RedisMemoryHigh
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: cache
+          team: platform
+        annotations:
+          summary: "Redis memory usage is high"
+          description: "Redis memory usage is {{ $value }}% of allocated memory"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/redis-memory"
+
+      # Cache Hit Rate
+      - alert: PlumbingAI_LowCacheHitRate
+        expr: rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m])) < 0.8
+        for: 10m
+        labels:
+          severity: warning
+          service: cache
+          team: platform
+        annotations:
+          summary: "Low cache hit rate detected"
+          description: "Cache hit rate is {{ $value }}, which may indicate cache efficiency issues"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/cache-hit-rate"
+
+  # Business Logic Alerts
+  - name: plumbing_ai_business
+    rules:
+      # Job Completion Rate
+      - alert: PlumbingAI_LowJobCompletionRate
+        expr: (rate(jobs_completed_total[1h]) / rate(jobs_created_total[1h])) < 0.95
+        for: 30m
+        labels:
+          severity: warning
+          service: job-management
+          team: operations
+        annotations:
+          summary: "Low job completion rate detected"
+          description: "Job completion rate is {{ $value }}, below 95% threshold"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/job-completion"
+
+      # Revenue Impact
+      - alert: PlumbingAI_RevenueImpact
+        expr: rate(revenue_lost_total[1h]) > 1000
+        for: 15m
+        labels:
+          severity: critical
+          service: business
+          team: business-ops
+        annotations:
+          summary: "Significant revenue impact detected"
+          description: "Revenue loss rate is ${{ $value }}/hour due to system issues"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/revenue-impact"
+
+      # Technician Utilization
+      - alert: PlumbingAI_LowTechnicianUtilization
+        expr: avg_over_time(technician_utilization_percentage[2h]) < 60
+        for: 1h
+        labels:
+          severity: warning
+          service: scheduling
+          team: operations
+        annotations:
+          summary: "Low technician utilization detected"
+          description: "Average technician utilization is {{ $value }}% over the last 2 hours"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/technician-utilization"
+
+  # Infrastructure Alerts
+  - name: plumbing_ai_infrastructure
+    rules:
+      # Pod Restart Rate
+      - alert: PlumbingAI_HighPodRestartRate
+        expr: rate(kube_pod_container_status_restarts_total{namespace=~"plumbing-ai.*"}[15m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: kubernetes
+          team: platform
+        annotations:
+          summary: "High pod restart rate detected"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/pod-restarts"
+
+      # Resource Utilization
+      - alert: PlumbingAI_HighCPUUsage
+        expr: (rate(container_cpu_usage_seconds_total{namespace=~"plumbing-ai.*"}[5m]) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: kubernetes
+          team: platform
+        annotations:
+          summary: "High CPU usage in container"
+          description: "Container {{ $labels.container }} CPU usage is {{ $value }}%"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/high-cpu"
+
+      - alert: PlumbingAI_HighMemoryUsage
+        expr: (container_memory_usage_bytes{namespace=~"plumbing-ai.*"} / container_spec_memory_limit_bytes) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+          service: kubernetes
+          team: platform
+        annotations:
+          summary: "High memory usage in container"
+          description: "Container {{ $labels.container }} memory usage is {{ $value }}%"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/high-memory"
+
+  # Security Alerts
+  - name: plumbing_ai_security
+    rules:
+      # Failed Authentication Attempts
+      - alert: PlumbingAI_HighFailedLoginAttempts
+        expr: rate(auth_failed_attempts_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          service: authentication
+          team: security
+        annotations:
+          summary: "High number of failed login attempts"
+          description: "{{ $value }} failed login attempts per second detected"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/failed-logins"
+
+      # Suspicious API Activity
+      - alert: PlumbingAI_SuspiciousAPIActivity
+        expr: rate(http_requests_total{status="429"}[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+          team: security
+        annotations:
+          summary: "High rate of rate-limited requests"
+          description: "{{ $value }} rate-limited requests per second may indicate abuse"
+          runbook_url: "https://docs.plumbing-ai.com/runbooks/api-abuse"

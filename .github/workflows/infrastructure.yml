@@ -1,0 +1,366 @@
+# Infrastructure Pipeline for Plumbing AI Platform
+name: Infrastructure Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - 'k8s/**'
+      - '.github/workflows/infrastructure.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - 'k8s/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform Action'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+        - plan
+        - apply
+        - destroy
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  TF_VERSION: '1.6.0'
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  # Terraform Plan
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'plan')
+
+    strategy:
+      matrix:
+        environment: [staging, production]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Terraform Format Check
+      working-directory: ./terraform
+      run: terraform fmt -check -recursive
+
+    - name: Terraform Init
+      working-directory: ./terraform
+      run: |
+        terraform init \
+          -backend-config="bucket=${{ vars.TERRAFORM_BACKEND_BUCKET }}" \
+          -backend-config="key=plumbing-ai/${{ matrix.environment }}/terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}"
+
+    - name: Terraform Validate
+      working-directory: ./terraform
+      run: terraform validate
+
+    - name: Terraform Plan
+      working-directory: ./terraform
+      env:
+        TF_VAR_environment: ${{ matrix.environment }}
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+        TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
+        TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+        TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        terraform plan \
+          -var-file="environments/${{ matrix.environment }}.tfvars" \
+          -out=tfplan-${{ matrix.environment }} \
+          -detailed-exitcode
+
+    - name: Upload Plan Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: tfplan-${{ matrix.environment }}
+        path: terraform/tfplan-${{ matrix.environment }}
+        retention-days: 5
+
+    - name: Comment PR with Plan
+      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request'
+      with:
+        script: |
+          const fs = require('fs');
+          const { execSync } = require('child_process');
+          
+          // Get terraform plan output
+          const planOutput = execSync('cd terraform && terraform show -no-color tfplan-${{ matrix.environment }}', { encoding: 'utf-8' });
+          
+          const comment = `
+          ## Terraform Plan Results for ${{ matrix.environment }}
+          
+          \`\`\`
+          ${planOutput}
+          \`\`\`
+          
+          <details>
+          <summary>Plan Summary</summary>
+          
+          - **Environment**: ${{ matrix.environment }}
+          - **Terraform Version**: ${{ env.TF_VERSION }}
+          - **AWS Region**: ${{ env.AWS_REGION }}
+          
+          </details>
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+  # Terraform Apply
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [terraform-plan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply')
+    environment:
+      name: ${{ github.event.inputs.environment || 'staging' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Set Environment
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+        else
+          echo "ENVIRONMENT=staging" >> $GITHUB_ENV
+        fi
+
+    - name: Terraform Init
+      working-directory: ./terraform
+      run: |
+        terraform init \
+          -backend-config="bucket=${{ vars.TERRAFORM_BACKEND_BUCKET }}" \
+          -backend-config="key=plumbing-ai/${{ env.ENVIRONMENT }}/terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}"
+
+    - name: Download Plan Artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: tfplan-${{ env.ENVIRONMENT }}
+        path: terraform/
+
+    - name: Terraform Apply
+      working-directory: ./terraform
+      env:
+        TF_VAR_environment: ${{ env.ENVIRONMENT }}
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+        TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
+        TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+        TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: terraform apply -auto-approve tfplan-${{ env.ENVIRONMENT }}
+
+    - name: Save Terraform Outputs
+      working-directory: ./terraform
+      run: |
+        terraform output -json > ../terraform-outputs-${{ env.ENVIRONMENT }}.json
+
+    - name: Upload Terraform Outputs
+      uses: actions/upload-artifact@v3
+      with:
+        name: terraform-outputs-${{ env.ENVIRONMENT }}
+        path: terraform-outputs-${{ env.ENVIRONMENT }}.json
+        retention-days: 30
+
+    - name: Update Kubernetes Configurations
+      run: |
+        # Extract outputs for Kubernetes configuration
+        VPC_ID=$(cat terraform-outputs-${{ env.ENVIRONMENT }}.json | jq -r '.vpc_id.value')
+        EKS_CLUSTER_NAME=$(cat terraform-outputs-${{ env.ENVIRONMENT }}.json | jq -r '.eks_cluster_name.value')
+        RDS_ENDPOINT=$(cat terraform-outputs-${{ env.ENVIRONMENT }}.json | jq -r '.rds_endpoint.value')
+        REDIS_ENDPOINT=$(cat terraform-outputs-${{ env.ENVIRONMENT }}.json | jq -r '.redis_endpoint.value')
+        
+        # Update kubeconfig
+        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $EKS_CLUSTER_NAME
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/namespace.yaml
+        kubectl apply -f k8s/configmap.yaml
+        kubectl apply -f k8s/secrets.yaml
+
+    - name: Notify Success
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        text: 'Infrastructure deployment succeeded for ${{ env.ENVIRONMENT }} environment'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+      if: success()
+
+  # Security Compliance Check
+  security-compliance:
+    name: Security Compliance Check
+    runs-on: ubuntu-latest
+    needs: [terraform-plan]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Checkov (Terraform Security Scan)
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: terraform/
+        framework: terraform
+        output_format: sarif
+        output_file_path: checkov-results.sarif
+
+    - name: Upload Checkov results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: checkov-results.sarif
+
+    - name: Run tfsec (Terraform Security Scanner)
+      uses: aquasecurity/tfsec-action@v1.0.3
+      with:
+        working_directory: terraform/
+        format: sarif
+        output_file: tfsec-results.sarif
+
+    - name: Upload tfsec results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: tfsec-results.sarif
+
+  # Cost Estimation
+  cost-estimation:
+    name: Cost Estimation
+    runs-on: ubuntu-latest
+    needs: [terraform-plan]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Infracost
+      uses: infracost/actions/setup@v2
+      with:
+        api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+    - name: Generate Infracost JSON
+      working-directory: ./terraform
+      run: |
+        infracost breakdown --path . \
+          --format json \
+          --out-file /tmp/infracost.json
+
+    - name: Post Infracost comment
+      uses: infracost/actions/comment@v1
+      if: github.event_name == 'pull_request'
+      with:
+        path: /tmp/infracost.json
+        behavior: update
+
+  # Terraform Destroy (Manual Trigger Only)
+  terraform-destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    environment:
+      name: ${{ github.event.inputs.environment }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Terraform Init
+      working-directory: ./terraform
+      run: |
+        terraform init \
+          -backend-config="bucket=${{ vars.TERRAFORM_BACKEND_BUCKET }}" \
+          -backend-config="key=plumbing-ai/${{ github.event.inputs.environment }}/terraform.tfstate" \
+          -backend-config="region=${{ env.AWS_REGION }}"
+
+    - name: Terraform Destroy Plan
+      working-directory: ./terraform
+      env:
+        TF_VAR_environment: ${{ github.event.inputs.environment }}
+        TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+        TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
+        TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+        TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        terraform plan -destroy \
+          -var-file="environments/${{ github.event.inputs.environment }}.tfvars" \
+          -out=destroy-plan
+
+    - name: Manual Approval for Destroy
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ secrets.GITHUB_TOKEN }}
+        approvers: ${{ vars.DESTROY_APPROVERS }}
+        minimum-approvals: 2
+        issue-title: "Terraform Destroy Approval for ${{ github.event.inputs.environment }}"
+        issue-body: |
+          Please review and approve the destruction of infrastructure for ${{ github.event.inputs.environment }} environment.
+          
+          **Environment**: ${{ github.event.inputs.environment }}
+          **Triggered by**: ${{ github.actor }}
+          **Branch**: ${{ github.ref }}
+          
+          This action is **IRREVERSIBLE** and will destroy all resources.
+
+    - name: Terraform Destroy
+      working-directory: ./terraform
+      run: terraform apply -auto-approve destroy-plan
+
+    - name: Notify Destruction
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        text: 'Infrastructure destroyed for ${{ github.event.inputs.environment }} environment'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
